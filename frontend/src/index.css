@@ -1,0 +1,43 @@
+/* Minimal custom styles retained for utility classes not yet migrated to Tailwind */
+/* Tailwind base utilities will handle most layout, spacing and typography. */
+@import "tailwindcss";
+
+/* Remove browser default margins and use the recommended box-sizing model */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+:root {
+  /* Match the navbar's Tailwind height utility `h-16` (4rem = 64px) */
+  --navbar-height: 4rem;
+  --footer-height: 60px;
+}
+
+body {
+  @apply bg-gradient-to-br from-blue-100 via-pink-100 to-yellow-100 min-h-screen;
+}
+
+html, body, #root { height: 100%; }
+
+/* Small legacy helpers */
+.auth-form { max-width: 400px; margin: 2rem auto; }
+.course-card-img { height: 200px; object-fit: cover; }
+.course-sidebar { width: 320px; }
+.lesson-video-wrapper { position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; }
+.lesson-video-wrapper iframe, .lesson-video-wrapper video { position: absolute; top:0; left:0; width:100%; height:100%; }
+
+/* Improve focus visibility for keyboard users while keeping mouse focus subtle */
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 3px solid rgba(99, 102, 241, 0.9); /* indigo-500 */
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Ensure page content sits below the fixed navbar */
+.main-content {
+  padding-top: var(--navbar-height);
+}
+
