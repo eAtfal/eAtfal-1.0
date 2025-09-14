@@ -117,7 +117,7 @@ function CourseDetails() {
   const handleDownloadCertificate = () => {
     if (!user) return toast.error('Please login to download certificate')
     // If backend provides an endpoint, navigate there. Fallback to a placeholder route.
-    navigate(`/courses/${courseId}/certificate`)
+    navigate(`courses/${courseId}/certificate`)
   }
 
   // When user is enrolled, clicking the main CTA continues learning.
