@@ -97,6 +97,15 @@ function Navbar() {
                 </NavLink>
               )}
 
+              <NavLink
+                className={({ isActive }) => `block px-4 py-2 rounded-full transition transform hover:scale-105 hover:bg-white/20 focus:outline-none focus-visible:ring-4 focus-visible:ring-white/40 ${isActive ? 'bg-white/20 font-semibold' : ''}`}
+                to="/leaderboard"
+                onClick={closeNav}
+                role="menuitem"
+              >
+                Leaderboard
+              </NavLink>
+
               {localUser?.is_admin || String(localUser?.role || '').toUpperCase() === 'ADMIN' ? (
                 <NavLink
                   className="block px-4 py-2 rounded-full transition transform hover:scale-105 hover:bg-white/20 focus:outline-none focus-visible:ring-4 focus-visible:ring-white/40"

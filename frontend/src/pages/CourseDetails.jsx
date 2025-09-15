@@ -8,6 +8,7 @@ import { formatDate, formatDuration, calculateProgress } from '../utils/format'
 import ProgressRing from '../components/ProgressRing'
 import { motion, AnimatePresence } from 'framer-motion'
 import { BadgeCheck, Clock, Loader2, MoveRight, Play, Users, Star, Share2, Download } from 'lucide-react'
+import scrollToTop from '../utils/scrollToTop';
 
 function CourseDetails() {
   const { courseId } = useParams()
@@ -31,6 +32,11 @@ function CourseDetails() {
       window.removeEventListener('storage', onAuthChanged)
     }
   }, [courseId, queryClient])
+
+  // Ensure course details scroll to top when navigated to
+  useEffect(() => {
+    scrollToTop({ behavior: 'smooth', focusSelector: null });
+  }, []);
 
   const { data: course, isLoading, error } = useQuery({
     queryKey: ['course', courseId],
@@ -336,7 +342,7 @@ function CourseDetails() {
       {/* Body sections */}
       <div className="max-w-4xl mx-auto px-4 pb-8">
         {/* Tabs */}
-        <div className="bg-white rounded-lg shadow-md p-2 flex gap-2"> 
+        <div className="bg-white rounded-lg shadow-md p-2 flex gap-2">
           <button onClick={() => setActiveTab('overview')} className={`px-4 py-2 rounded-md ${activeTab === 'overview' ? 'bg-blue-600 text-white' : 'text-gray-700'}`}>Overview</button>
           <button onClick={() => setActiveTab('syllabus')} className={`px-4 py-2 rounded-md ${activeTab === 'syllabus' ? 'bg-blue-600 text-white' : 'text-gray-700'}`}>Syllabus</button>
           <button onClick={() => setActiveTab('reviews')} className={`px-4 py-2 rounded-md ${activeTab === 'reviews' ? 'bg-blue-600 text-white' : 'text-gray-700'}`}>Reviews</button>
@@ -389,7 +395,7 @@ function CourseDetails() {
                 <div className="flex items-center gap-2">
                   <div className="text-sm">Your rating:</div>
                   <div className="flex items-center gap-1">
-                    {[1,2,3,4,5].map(n => (
+                    {[1, 2, 3, 4, 5].map(n => (
                       <button key={n} onClick={() => setReviewRating(n)} className={`p-1 ${reviewRating >= n ? 'text-amber-400' : 'text-gray-300'}`}><Star className="h-5 w-5" /></button>
                     ))}
                   </div>

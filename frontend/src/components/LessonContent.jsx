@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-toastify'
 import ReactMarkdown from 'react-markdown'
-import { lessonsAPI } from '../api'
+import { lessonsAPI, leaderboardAPI } from '../api'
 import LessonCompletePopup from './LessonCompletePopup'
 import { FaArrowLeft, FaArrowRight, FaSpinner, FaCheckCircle } from 'react-icons/fa'
 import { motion } from 'framer-motion'
@@ -13,6 +13,8 @@ function LessonContent() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [showComplete, setShowComplete] = useState(false)
+  const [marking, setMarking] = useState(false)
+  const completedKey = `lessonCompleted:${courseId}:${lessonId}`
 
   const { data: lesson, isLoading, error } = useQuery({
     queryKey: ['lesson', courseId, lessonId],
@@ -53,16 +55,56 @@ function LessonContent() {
       })
       queryClient.setQueryData(['course', courseId], old => old ? { ...old, completed_lessons: (old.completed_lessons || 0) + 1 } : old)
 
-      return { previousLesson, previousLessons, previousCourse }
+      // Try to fetch current leaderboard to determine previous rank
+      let previousLeaderboardPlayers = []
+      try {
+        const lb = await leaderboardAPI.getGlobal()
+        previousLeaderboardPlayers = lb.data || []
+      } catch (e) {
+        previousLeaderboardPlayers = []
+      }
+
+      return { previousLesson, previousLessons, previousCourse, previousLeaderboardPlayers }
     },
     onError: (error, variables, context) => {
       if (context?.previousLesson) queryClient.setQueryData(['lesson', courseId, lessonId], context.previousLesson)
       if (context?.previousLessons) queryClient.setQueryData(['lessons', courseId], context.previousLessons)
       if (context?.previousCourse) queryClient.setQueryData(['course', courseId], context.previousCourse)
+      setMarking(false)
+      try { localStorage.removeItem(completedKey) } catch (e) {}
       toast.error(error.response?.data?.detail || 'Failed to complete lesson')
     },
-    onSuccess: () => {
-      setShowComplete(true)
+    onSuccess: async (data, variables, context) => {
+      // After marking lesson complete, fetch updated leaderboard to show new rank/points
+      try {
+        const res = await leaderboardAPI.getGlobal()
+        const players = res.data || []
+        // Determine current user id from localStorage normalized user
+        const stored = localStorage.getItem('user')
+        const parsed = stored ? JSON.parse(stored) : null
+        const myId = parsed?.id
+
+        // Previous leaderboard from onMutate context (best-effort)
+        const prevPlayers = context?.previousLeaderboardPlayers || []
+        const prevIndex = prevPlayers.findIndex(p => String(p.id) === String(myId))
+        const previousRank = prevIndex >= 0 ? prevIndex + 1 : null
+
+        // New leaderboard
+        const myEntry = players.find(p => String(p.id) === String(myId))
+        const newRank = myEntry ? players.findIndex(p => String(p.id) === String(myId)) + 1 : null
+        const totalPoints = myEntry ? myEntry.points : null
+
+        const delta = (previousRank && newRank) ? (previousRank - newRank) : null
+
+        // Store in state by embedding in the popup props via setShowComplete
+        setShowComplete({ show: true, earnedPoints: 10, previousRank, newRank, delta, totalPoints })
+        try { localStorage.setItem(completedKey, '1') } catch (e) {}
+      } catch (e) {
+        // fallback UX if leaderboard fails
+        setShowComplete({ show: true, earnedPoints: 10, previousRank: null, newRank: null, delta: null, totalPoints: null })
+        try { localStorage.setItem(completedKey, '1') } catch (e) {}
+      }
+
       toast.success('🎉 Lesson completed!')
     },
     onSettled: () => {
@@ -73,12 +115,60 @@ function LessonContent() {
     }
   })
 
+  const handleMarkComplete = () => {
+    if (marking || completeLessonMutation.isLoading) return
+    setMarking(true)
+    completeLessonMutation.mutate()
+  }
+
+  const isPersistedCompleted = () => {
+    try { return Boolean(localStorage.getItem(completedKey)) } catch (e) { return false }
+  }
+  const isCompleted = Boolean(lesson?.completed) || isPersistedCompleted()
+
   const handleNext = () => {
-    if (lesson.next_lesson_id) navigate(`/courses/${courseId}/learn/${lesson.next_lesson_id}`)
-    else {
+    // Navigate to the next logical item (next lesson, then quizzes, then course)
+    try {
+      if (lesson && lesson.next_lesson_id) {
+        navigate(`/courses/${courseId}/learn/${lesson.next_lesson_id}`)
+        return
+      }
+
+      const lessonsList = queryClient.getQueryData(['lessons', courseId]) || []
+      const quizzesList = queryClient.getQueryData(['quizzes', courseId]) || []
+
+      const matchesId = (l, target) => {
+        const t = String(target)
+        return [l?.id, l?.lesson_id, l?.pk, l?._id].some(v => typeof v !== 'undefined' && String(v) === t)
+      }
+
+      const idx = lessonsList.findIndex(l => matchesId(l, lessonId))
+      if (idx >= 0 && idx < lessonsList.length - 1) {
+        const next = lessonsList[idx + 1]
+        const nextId = next?.id ?? next?.lesson_id ?? next?.pk ?? next?._id
+        if (nextId) {
+          navigate(`/courses/${courseId}/learn/${nextId}`)
+          return
+        }
+      }
+
+      if ((quizzesList || []).length > 0) {
+        const q = quizzesList[0]
+        if (q && q.id) {
+          navigate(`/courses/${courseId}/learn/quiz/${q.id}`)
+          return
+        }
+      }
+
       navigate(`/courses/${courseId}`)
-      toast.success("🎓 Congratulations! You've completed the course!")
+    } catch (e) {
+      navigate(`/courses/${courseId}`)
     }
+  }
+
+  const goToNext = () => {
+    // Reuse same logic as handleNext
+    handleNext()
   }
 
   const renderVideo = (url) => {
@@ -156,11 +246,14 @@ function LessonContent() {
   return (
     <div className="max-w-4xl mx-auto px-4 space-y-6">
       <LessonCompletePopup
-        show={showComplete}
+        show={typeof showComplete === 'object' ? showComplete.show : showComplete}
         onClose={() => setShowComplete(false)}
         title="🎉 Well done!"
         message="You completed the lesson and earned progress."
         autoCloseMs={4000}
+        earnedPoints={typeof showComplete === 'object' ? showComplete.earnedPoints : 10}
+        newRank={typeof showComplete === 'object' ? showComplete.newRank : null}
+        totalPoints={typeof showComplete === 'object' ? showComplete.totalPoints : null}
       />
 
       {/* Lesson Title */}
@@ -194,31 +287,36 @@ function LessonContent() {
         >
           <FaArrowLeft /> Back
         </button>
+        <div className="flex items-center gap-2">
+          {!isCompleted && (
+            <button
+              className={
+                "flex items-center gap-2 px-4 py-2 rounded-xl bg-green-500 text-white transition shadow-lg " +
+                (marking || completeLessonMutation.isLoading ? "opacity-60 cursor-not-allowed" : "hover:bg-green-600")
+              }
+              onClick={handleMarkComplete}
+              disabled={marking || completeLessonMutation.isLoading}
+              aria-disabled={marking || completeLessonMutation.isLoading}
+            >
+              {completeLessonMutation.isLoading ? (
+                <>
+                  <FaSpinner className="animate-spin" /> Loading...
+                </>
+              ) : (
+                <>
+                  <FaCheckCircle /> Mark as Complete
+                </>
+              )}
+            </button>
+          )}
 
-        {lesson.completed ? (
           <button
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition shadow-lg"
-            onClick={handleNext}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white transition shadow-lg hover:bg-indigo-700"
+            onClick={goToNext}
           >
-            {lesson.next_lesson_id ? 'Next Lesson' : 'Finish Course'} <FaArrowRight />
+            Go to next item <FaArrowRight />
           </button>
-        ) : (
-          <button
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-green-500 text-white hover:bg-green-600 transition shadow-lg"
-            onClick={() => completeLessonMutation.mutate()}
-            disabled={completeLessonMutation.isLoading}
-          >
-            {completeLessonMutation.isLoading ? (
-              <>
-                <FaSpinner className="animate-spin" /> Loading...
-              </>
-            ) : (
-              <>
-                <FaCheckCircle /> Mark as Complete
-              </>
-            )}
-          </button>
-        )}
+        </div>
       </div>
     </div>
   )

@@ -17,6 +17,7 @@ import LessonContent from './components/LessonContent'
 import QuizPage from './pages/QuizPage'
 import UsersList from './pages/UsersList'
 import UserProfile from './pages/UserProfile'
+import LeaderboardPage from './pages/LeaderboardPage'
 
 function App() {
   return (
@@ -101,6 +102,7 @@ function App() {
           </Route>
         </Route>
         {/* Public user routes */}
+  <Route path="leaderboard" element={<LeaderboardPage />} />
         <Route path="users">
           <Route index element={<UsersList />} />
           <Route path=":id" element={<UserProfile />} />

@@ -4,8 +4,15 @@ import CourseCard from '../components/CourseCard'
 import Hero from '../components/Hero'
 import { motion } from 'framer-motion'
 import { Sparkles, Search, Filter } from 'lucide-react'
+import scrollToTop from '../utils/scrollToTop'
+import { useEffect, useState } from 'react'
 
 function CourseList() {
+  // Ensure course list scrolls to top when navigated to
+  useEffect(() => {
+    scrollToTop({ behavior: 'smooth', focusSelector: null });
+  }, [])
+
   const {
     data: courses,
     isLoading,

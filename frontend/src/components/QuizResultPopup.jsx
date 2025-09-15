@@ -7,6 +7,9 @@ export default function QuizResultPopup({
   show = false,
   onClose,
   autoCloseMs = 5000,
+  earnedPoints = 20,
+  newRank = null,
+  totalPoints = null,
 }) {
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [progress, setProgress] = useState(100);
@@ -124,9 +127,40 @@ export default function QuizResultPopup({
           {/* Message */}
           <p className="mt-2 text-lg text-gray-700 font-medium px-6">
             {isPass
-              ? "You passed the quiz successfully 🎉 Keep up the awesome work!"
+              ? `You passed the quiz and earned +${earnedPoints} points 🎉`
               : "Almost there! Review the lesson and give it another shot 💪"}
           </p>
+
+          {/* Leaderboard info */}
+          {isPass && (typeof newRank === 'number' || totalPoints !== null) && (
+            <div className="mt-4 flex items-center justify-center gap-6">
+              <div className="text-center">
+                <div className="text-sm text-gray-500">Points Earned</div>
+                <div className="text-2xl font-bold text-indigo-700">+{earnedPoints}</div>
+              </div>
+              <div className="text-center">
+                <div className="text-sm text-gray-500">New Total</div>
+                <div className="text-2xl font-bold text-indigo-700">{totalPoints ?? '—'}</div>
+              </div>
+              <div className="text-center">
+                <div className="text-sm text-gray-500">New Rank</div>
+                <div className="text-2xl font-bold text-indigo-700">{newRank ? `#${newRank}` : '—'}</div>
+              </div>
+            </div>
+          )}
+
+          {/* Ladder animation */}
+          {isPass && typeof newRank === 'number' && (
+            <div className="mt-6 flex items-center justify-center">
+              <motion.div initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ type: 'spring', stiffness: 220 }} className="w-64 bg-white/60 rounded-xl p-3 shadow-inner border border-yellow-100">
+                <div className="text-xs text-gray-500 mb-1">Leaderboard Climb</div>
+                <div className="relative h-3 bg-gray-200 rounded-full overflow-hidden">
+                  <motion.div className="h-3 bg-gradient-to-r from-yellow-400 via-pink-400 to-indigo-500 rounded-full" style={{ width: `${Math.min(100, (earnedPoints / Math.max(1, totalPoints || earnedPoints)) * 100)}%` }} animate={{ width: [`0%`, `${Math.min(100, (earnedPoints / Math.max(1, totalPoints || earnedPoints)) * 100)}%`] }} transition={{ duration: 1.2 }} />
+                </div>
+                <div className="mt-2 text-xs text-gray-600">You moved up to <span className="font-semibold">#{newRank}</span></div>
+              </motion.div>
+            </div>
+          )}
 
           {/* Extra decoration */}
           {isPass ? (

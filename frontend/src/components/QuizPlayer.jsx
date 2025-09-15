@@ -6,6 +6,7 @@ import { calculateProgress } from '../utils/format'
 import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'react-toastify'
 import QuizResultPopup from './QuizResultPopup'
+import { leaderboardAPI } from '../api'
 
 function ProgressBar({ current, total }) {
   const pct = calculateProgress(current, total)
@@ -39,10 +40,27 @@ export default function QuizPlayer({ courseId, quizId, renderSingle = false }) {
       setSubmittedAttempt(data)
       // Show pass/fail popup
       const passed = data.total > 0 ? (data.score * 1.0) >= (data.total * 0.5) : false
-      setShowResultPopup(true)
+      // If passed, fetch leaderboard to show new rank/points
+      if (passed) {
+        leaderboardAPI.getGlobal()
+          .then(res => {
+            const players = res.data || []
+            const stored = localStorage.getItem('user')
+            const parsed = stored ? JSON.parse(stored) : null
+            const myId = parsed?.id
+            const myEntry = players.find(p => String(p.id) === String(myId))
+            const newRank = myEntry ? players.findIndex(p => String(p.id) === String(myId)) + 1 : null
+            const totalPoints = myEntry ? myEntry.points : null
+            // Pass the leaderboard info into the popup by storing on state
+            setShowResultPopup({ show: true, earnedPoints: 20, newRank, totalPoints })
+          })
+          .catch(() => setShowResultPopup({ show: true, earnedPoints: 20, newRank: null, totalPoints: null }))
+      } else {
+        setShowResultPopup(true)
+      }
       queryClient.invalidateQueries({ queryKey: ['quiz', quizId] })
       // Invalidate enrollments so passed_quizzes / progress updates are reflected
-      queryClient.invalidateQueries({ queryKey: ['my-enrollments'] })
+  queryClient.invalidateQueries({ queryKey: ['my-enrollments'] })
       // Also refresh course-level data if we have a courseId — fetch the fresh course object
       if (courseId) {
         queryClient.invalidateQueries({ queryKey: ['course', courseId] })
@@ -187,9 +205,12 @@ export default function QuizPlayer({ courseId, quizId, renderSingle = false }) {
         </div>
       )}
       <QuizResultPopup
-        show={showResultPopup}
+        show={typeof showResultPopup === 'object' ? showResultPopup.show : showResultPopup}
         type={(submittedAttempt && submittedAttempt.total > 0 && (submittedAttempt.score * 1.0) >= (submittedAttempt.total * 0.5)) ? 'pass' : 'fail'}
         onClose={() => setShowResultPopup(false)}
+        earnedPoints={typeof showResultPopup === 'object' ? showResultPopup.earnedPoints : 20}
+        newRank={typeof showResultPopup === 'object' ? showResultPopup.newRank : null}
+        totalPoints={typeof showResultPopup === 'object' ? showResultPopup.totalPoints : null}
       />
     </div>
   )

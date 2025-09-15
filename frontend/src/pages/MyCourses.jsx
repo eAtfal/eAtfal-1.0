@@ -6,7 +6,8 @@ import { Link } from 'react-router-dom'
 import { calculateProgress } from '../utils/format'
 import { toast } from 'react-toastify'
 import { motion } from 'framer-motion'
-import {useEffect} from 'react'
+import { useEffect } from 'react'
+import scrollToTop from '../utils/scrollToTop';
 
 function MyCourses() {
   const queryClient = useQueryClient()
@@ -18,6 +19,12 @@ function MyCourses() {
     queryKey: ['my-enrollments'],
     queryFn: () => enrollmentsAPI.getMyEnrollments().then((res) => res.data),
   })
+
+
+  // Ensure the courses page scrolls to top when navigated to
+  useEffect(() => {
+    scrollToTop({ behavior: 'smooth', focusSelector: null });
+  }, []);
 
   // Refetch enrollments when auth status changes (login/register/logout)
   // so the UI doesn't require a manual refresh to show enrollment/progress
@@ -95,7 +102,7 @@ function MyCourses() {
 
       if (!res.ok) {
         let data = null
-        try { data = await res.json() } catch {}
+        try { data = await res.json() } catch { }
         toast.error(data?.detail || 'Failed to download certificate')
         return
       }

@@ -8,13 +8,6 @@ export const api = axios.create({
   },
 })
 
-// export const api = axios.create({
-//   baseURL: 'http://192.168.1.100:8000/api/v1',
-//   headers: {
-//     'Content-Type': 'application/json',
-//   },
-// })
-
 // Request interceptor for API calls
 api.interceptors.request.use(
   (config) => {
@@ -102,6 +95,10 @@ export const lessonsAPI = {
     api.put(`/courses/${courseId}/lessons/${lessonId}`, data),
   delete: (courseId, lessonId) => 
     api.delete(`/courses/${courseId}/lessons/${lessonId}`),
+}
+
+export const leaderboardAPI = {
+  getGlobal: () => api.get('/leaderboard')
 }
 
 export const enrollmentsAPI = {
