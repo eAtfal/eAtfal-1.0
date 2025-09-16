@@ -8,6 +8,7 @@ import MyCourses from './pages/MyCourses'
 import AdminDashboard from './pages/AdminDashboard'
 import AdminUsers from './pages/AdminUsers'
 import AdminCourses from './pages/AdminCourses'
+import AdminReports from './pages/AdminReports'
 import AdminCourseLessons from './components/AdminCourseLessons'
 import AdminCourseQuizzes from './components/AdminCourseQuizzes'
 import CreateLesson from './pages/CreateLesson'
@@ -56,6 +57,14 @@ function App() {
             element={
               <ProtectedRoute requireAdmin>
                 <AdminCourses />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="reports"
+            element={
+              <ProtectedRoute requireAdmin>
+                <AdminReports />
               </ProtectedRoute>
             }
           />

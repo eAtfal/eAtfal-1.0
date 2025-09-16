@@ -14,7 +14,6 @@ function LessonContent() {
   const queryClient = useQueryClient()
   const [showComplete, setShowComplete] = useState(false)
   const [marking, setMarking] = useState(false)
-  const completedKey = `lessonCompleted:${courseId}:${lessonId}`
 
   const { data: lesson, isLoading, error } = useQuery({
     queryKey: ['lesson', courseId, lessonId],
@@ -71,7 +70,6 @@ function LessonContent() {
       if (context?.previousLessons) queryClient.setQueryData(['lessons', courseId], context.previousLessons)
       if (context?.previousCourse) queryClient.setQueryData(['course', courseId], context.previousCourse)
       setMarking(false)
-      try { localStorage.removeItem(completedKey) } catch (e) {}
       toast.error(error.response?.data?.detail || 'Failed to complete lesson')
     },
     onSuccess: async (data, variables, context) => {
@@ -98,11 +96,9 @@ function LessonContent() {
 
         // Store in state by embedding in the popup props via setShowComplete
         setShowComplete({ show: true, earnedPoints: 10, previousRank, newRank, delta, totalPoints })
-        try { localStorage.setItem(completedKey, '1') } catch (e) {}
       } catch (e) {
         // fallback UX if leaderboard fails
         setShowComplete({ show: true, earnedPoints: 10, previousRank: null, newRank: null, delta: null, totalPoints: null })
-        try { localStorage.setItem(completedKey, '1') } catch (e) {}
       }
 
       toast.success('🎉 Lesson completed!')
@@ -121,54 +117,14 @@ function LessonContent() {
     completeLessonMutation.mutate()
   }
 
-  const isPersistedCompleted = () => {
-    try { return Boolean(localStorage.getItem(completedKey)) } catch (e) { return false }
-  }
-  const isCompleted = Boolean(lesson?.completed) || isPersistedCompleted()
-
   const handleNext = () => {
-    // Navigate to the next logical item (next lesson, then quizzes, then course)
-    try {
-      if (lesson && lesson.next_lesson_id) {
-        navigate(`/courses/${courseId}/learn/${lesson.next_lesson_id}`)
-        return
-      }
-
-      const lessonsList = queryClient.getQueryData(['lessons', courseId]) || []
-      const quizzesList = queryClient.getQueryData(['quizzes', courseId]) || []
-
-      const matchesId = (l, target) => {
-        const t = String(target)
-        return [l?.id, l?.lesson_id, l?.pk, l?._id].some(v => typeof v !== 'undefined' && String(v) === t)
-      }
-
-      const idx = lessonsList.findIndex(l => matchesId(l, lessonId))
-      if (idx >= 0 && idx < lessonsList.length - 1) {
-        const next = lessonsList[idx + 1]
-        const nextId = next?.id ?? next?.lesson_id ?? next?.pk ?? next?._id
-        if (nextId) {
-          navigate(`/courses/${courseId}/learn/${nextId}`)
-          return
-        }
-      }
-
-      if ((quizzesList || []).length > 0) {
-        const q = quizzesList[0]
-        if (q && q.id) {
-          navigate(`/courses/${courseId}/learn/quiz/${q.id}`)
-          return
-        }
-      }
-
-      navigate(`/courses/${courseId}`)
-    } catch (e) {
-      navigate(`/courses/${courseId}`)
-    }
+    if (lesson && lesson.next_lesson_id) navigate(`/courses/${courseId}/learn/${lesson.next_lesson_id}`)
+    else navigate(`/courses/${courseId}`)
   }
 
   const goToNext = () => {
-    // Reuse same logic as handleNext
-    handleNext()
+    if (lesson && lesson.next_lesson_id) navigate(`/courses/${courseId}/learn/${lesson.next_lesson_id}`)
+    else navigate(`/courses/${courseId}`)
   }
 
   const renderVideo = (url) => {
@@ -280,43 +236,40 @@ function LessonContent() {
       </motion.div>
 
       {/* Navigation Buttons */}
-      <div className="flex justify-between mt-4 flex-wrap gap-2">
-        <button
+      <div className="flex flex-wrap gap-2 mt-4 items-center">
+        {/* <button
           className="flex items-center gap-2 px-4 py-2 rounded-xl border border-purple-300 text-purple-700 hover:bg-purple-50 transition"
           onClick={() => window.history.back()}
         >
           <FaArrowLeft /> Back
-        </button>
-        <div className="flex items-center gap-2">
-          {!isCompleted && (
-            <button
-              className={
-                "flex items-center gap-2 px-4 py-2 rounded-xl bg-green-500 text-white transition shadow-lg " +
-                (marking || completeLessonMutation.isLoading ? "opacity-60 cursor-not-allowed" : "hover:bg-green-600")
-              }
-              onClick={handleMarkComplete}
-              disabled={marking || completeLessonMutation.isLoading}
-              aria-disabled={marking || completeLessonMutation.isLoading}
-            >
-              {completeLessonMutation.isLoading ? (
-                <>
-                  <FaSpinner className="animate-spin" /> Loading...
-                </>
-              ) : (
-                <>
-                  <FaCheckCircle /> Mark as Complete
-                </>
-              )}
-            </button>
+        </button> */}
+        {/* Mark as Complete button, always disabled if lesson.completed */}
+        <button
+          className={
+            "flex items-center gap-2 px-4 py-2 rounded-xl bg-green-500 text-white transition shadow-lg " +
+            ((marking || completeLessonMutation.isLoading || lesson?.completed) ? "opacity-60 cursor-not-allowed" : "hover:bg-green-600")
+          }
+          onClick={handleMarkComplete}
+          disabled={marking || completeLessonMutation.isLoading || lesson?.completed}
+          aria-disabled={marking || completeLessonMutation.isLoading || lesson?.completed}
+        >
+          {completeLessonMutation.isLoading ? (
+            <>
+              <FaSpinner className="animate-spin" /> Loading...
+            </>
+          ) : (
+            <>
+              <FaCheckCircle /> Mark as Complete
+            </>
           )}
-
-          <button
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white transition shadow-lg hover:bg-indigo-700"
-            onClick={goToNext}
-          >
-            Go to next item <FaArrowRight />
-          </button>
-        </div>
+        </button>
+        {/* Go to next item always on the far right */}
+        <button
+          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white transition shadow-lg hover:bg-indigo-700 ml-auto"
+          onClick={goToNext}
+        >
+          Go to next item <FaArrowRight />
+        </button>
       </div>
     </div>
   )

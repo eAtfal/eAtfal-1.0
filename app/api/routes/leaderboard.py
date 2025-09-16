@@ -33,21 +33,24 @@ async def global_leaderboard(db: AsyncSession = Depends(get_db)) -> List[dict]:
     pass_res = await db.execute(pass_q)
     passes_by_user = {row.user_id: row.passes for row in pass_res.fetchall()}
 
-    # Get all users who have any activity (or all users)
-    users_res = await db.execute(select(User))
-    users = users_res.scalars().all()
+    # Only include users who have activity (lesson completions or passing quiz attempts)
+    active_user_ids = set(list(lessons_by_user.keys()) + list(passes_by_user.keys()))
 
     players = []
-    for u in users:
-        lessons = lessons_by_user.get(u.id, 0)
-        passes = passes_by_user.get(u.id, 0)
-        points = lessons * 10 + passes * 20
-        players.append({
-            "id": u.id,
-            "nickname": u.full_name,
-            "avatarUrl": None,
-            "points": points,
-        })
+    if active_user_ids:
+        users_res = await db.execute(select(User).where(User.id.in_(active_user_ids)))
+        users = users_res.scalars().all()
+
+        for u in users:
+            lessons = lessons_by_user.get(u.id, 0)
+            passes = passes_by_user.get(u.id, 0)
+            points = lessons * 10 + passes * 20
+            players.append({
+                "id": u.id,
+                "nickname": u.full_name,
+                "avatarUrl": None,
+                "points": points,
+            })
 
     # Sort descending by points, then by nickname
     players.sort(key=lambda p: (-p["points"], p["nickname"]))

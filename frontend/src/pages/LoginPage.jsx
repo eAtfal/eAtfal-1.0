@@ -4,15 +4,20 @@ import { toast } from 'react-toastify'
 import AuthForm from '../components/AuthForm'
 import { motion } from 'framer-motion'
 import { BookOpen, Sparkles } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 
 function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
   const handleLogin = async (data) => {
     try {
       const result = await login(data)
       if (result?.user || result?.access_token) {
+        // Refresh enrollment and course-related caches so UI reflects auth state immediately
+        queryClient.invalidateQueries({ queryKey: ['my-enrollments'] })
+        queryClient.invalidateQueries({ queryKey: ['course'] })
         toast.success('Login successful!')
         navigate('/')
       }

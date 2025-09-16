@@ -3,14 +3,19 @@ import { useAuth } from '../hooks/useAuth.jsx'
 import { toast } from 'react-toastify'
 import AuthForm from '../components/AuthForm'
 import { motion } from 'framer-motion'
+import { useQueryClient } from '@tanstack/react-query'
 
 function RegisterPage() {
   const { register: registerUser } = useAuth()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
   const handleRegister = async (data) => {
     try {
       await registerUser(data)
+      // Update react-query caches so pages like CourseDetails reflect the new auth/enrollment state
+      queryClient.invalidateQueries({ queryKey: ['my-enrollments'] })
+      queryClient.invalidateQueries({ queryKey: ['course'] })
       toast.success('🎉 Registration successful!')
       navigate('/')
     } catch (error) {

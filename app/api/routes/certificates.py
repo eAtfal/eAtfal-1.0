@@ -13,6 +13,7 @@ from app.models.enrollment import Enrollment
 from app.models.course import Course
 from app.models.lesson import Lesson
 from app.models.lesson_completion import LessonCompletion
+from app.models.quiz import Quiz, QuizAttempt
 
 try:
     from PIL import Image, ImageDraw, ImageFont
@@ -68,6 +69,25 @@ async def get_certificate(
 
     if total_lessons == 0 or completed < total_lessons:
         raise HTTPException(status_code=403, detail='Course not completed yet')
+
+    # ✅ Ensure quizzes are passed when course has quizzes
+    total_quizzes = (await db.execute(
+        select(func.count(Quiz.id)).where(Quiz.course_id == course_id)
+    )).scalar() or 0
+
+    if total_quizzes > 0:
+        # Count distinct quizzes the user has passed (score >= 50%)
+        passed_quizzes = (await db.execute(
+            select(func.count(func.distinct(QuizAttempt.quiz_id))).where(
+                QuizAttempt.user_id == current_user.id,
+                QuizAttempt.quiz_id.in_(select(Quiz.id).where(Quiz.course_id == course_id)),
+                QuizAttempt.total > 0,
+                QuizAttempt.score >= (QuizAttempt.total * 0.5)
+            )
+        )).scalar() or 0
+
+        if passed_quizzes < total_quizzes:
+            raise HTTPException(status_code=403, detail='All quizzes must be passed to issue a certificate')
 
     # ✅ Load course title
     res = await db.execute(select(Course).where(Course.id == course_id))
