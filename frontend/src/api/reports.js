@@ -1,12 +1,12 @@
 import api from './index'
 
 export const reportsAPI = {
-  enrollments: () => api.get('/admin/reports/enrollments'),
-  completion: () => api.get('/admin/reports/completion'),
-  dropoffs: () => api.get('/admin/reports/dropoffs'),
-  averageTime: () => api.get('/admin/reports/average-time'),
-  quizPerformance: () => api.get('/admin/reports/quiz-performance'),
-  leaderboard: () => api.get('/admin/reports/leaderboard'),
+  enrollments: (params) => api.get('/admin/reports/enrollments', { params }),
+  completion: (params) => api.get('/admin/reports/completion', { params }),
+  dropoffs: (params) => api.get('/admin/reports/dropoffs', { params }),
+  averageTime: (params) => api.get('/admin/reports/average-time', { params }),
+  quizPerformance: (params) => api.get('/admin/reports/quiz-performance', { params }),
+  leaderboard: (params) => api.get('/admin/reports/leaderboard', { params }),
 }
 
 export default reportsAPI

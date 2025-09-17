@@ -24,7 +24,7 @@ router = APIRouter()
 
 @router.get("/admin/reports/enrollments", response_model=List[CourseEnrollmentReportItem])
 async def course_enrollment_report(db: AsyncSession = Depends(get_db), _=Depends(get_current_active_superuser)):
-    q = select(Course.id, Course.title, func.count(Enrollment.id).label("enrollments")).join(Enrollment, Enrollment.course_id == Course.id, isouter=True).group_by(Course.id)
+    q = select(Course.id, Course.title, func.count(Enrollment.id).label("enrollments")).join(Enrollment, Enrollment.course_id == Course.id, isouter=True).where(Course.is_published == True).group_by(Course.id)
     res = await db.execute(q)
     return [CourseEnrollmentReportItem(course_id=r.id, title=r.title, enrollments=int(r.enrollments or 0)) for r in res.fetchall()]
 
@@ -33,21 +33,33 @@ async def course_enrollment_report(db: AsyncSession = Depends(get_db), _=Depends
 async def completion_rate_report(db: AsyncSession = Depends(get_db), _=Depends(get_current_active_superuser)):
     # For each course: compute total lessons and completed lessons by all enrolled users as percentage
     total_lessons_sq = select(func.count(Lesson.id)).where(Lesson.course_id == Course.id).scalar_subquery()
-
-    completed_sq = (
-        select(func.count(LessonCompletion.id))
+    # Count distinct (user_id, lesson_id) completions by enrolled users only to avoid double-counting and exclude outsiders
+    # Subquery: distinct user-lesson completions where the user is enrolled in the course
+    completed_distinct_subq = (
+        select(LessonCompletion.user_id, LessonCompletion.lesson_id)
         .join(Lesson, Lesson.id == LessonCompletion.lesson_id)
+        .join(Enrollment, (Enrollment.course_id == Lesson.course_id) & (Enrollment.user_id == LessonCompletion.user_id))
         .where(Lesson.course_id == Course.id)
-        .scalar_subquery()
+        .distinct()
+        .subquery()
     )
+    distinct_completions_sq = select(func.count()).select_from(completed_distinct_subq).scalar_subquery()
 
-    q = select(Course.id, Course.title, total_lessons_sq.label("total_lessons"), completed_sq.label("completed_count"))
+    # Also ensure the course has lessons and enrollments before showing completion stats
+    enrollments_sq = select(func.count(Enrollment.id)).where(Enrollment.course_id == Course.id).scalar_subquery()
+
+    q = select(Course.id, Course.title, total_lessons_sq.label("total_lessons"), distinct_completions_sq.label("completed_count"), enrollments_sq.label("enrollments_count")).where(Course.is_published == True).where(total_lessons_sq > 0).where(enrollments_sq > 0)
     res = await db.execute(q)
     out = []
     for r in res.fetchall():
         total = int(r.total_lessons or 0)
         completed = int(r.completed_count or 0)
-        percent = round((completed / (total or 1)) * 100, 2) if total > 0 else 0.0
+        enrollments = int(r.enrollments_count or 0)
+        # percent = fraction of possible lesson completions completed by enrolled users
+        if total > 0 and enrollments > 0:
+            percent = round((completed / (total * enrollments)) * 100, 2)
+        else:
+            percent = 0.0
         out.append(CompletionRateReportItem(course_id=r.id, title=r.title, total_lessons=total, completed=completed, percent_complete=percent))
     return out
 
@@ -55,7 +67,16 @@ async def completion_rate_report(db: AsyncSession = Depends(get_db), _=Depends(g
 @router.get("/admin/reports/dropoffs", response_model=List[DropoffReportItem])
 async def dropoff_points_report(db: AsyncSession = Depends(get_db), _=Depends(get_current_active_superuser)):
     # Drop-off defined as lessons with the fewest completions relative to others in same course
-    q = select(Lesson.id, Lesson.course_id, Lesson.title, func.count(LessonCompletion.id).label("completions")).outerjoin(LessonCompletion, LessonCompletion.lesson_id == Lesson.id).group_by(Lesson.id)
+    # Count distinct enrolled users who completed each lesson to avoid double-counting repeat logs
+    # Only consider lessons that belong to an existing course (join Course)
+    q = (
+        select(Lesson.id, Lesson.course_id, Lesson.title, func.count(func.distinct(LessonCompletion.user_id)).label("completions"))
+        .join(Course, Course.id == Lesson.course_id)
+        .where(Course.is_published == True)
+        .outerjoin(LessonCompletion, LessonCompletion.lesson_id == Lesson.id)
+        .outerjoin(Enrollment, (Enrollment.course_id == Lesson.course_id) & (Enrollment.user_id == LessonCompletion.user_id))
+        .group_by(Lesson.id)
+    )
     res = await db.execute(q)
     rows = res.fetchall()
     # Map course -> list of lessons with completion counts, then compute lowest per course
@@ -67,6 +88,9 @@ async def dropoff_points_report(db: AsyncSession = Depends(get_db), _=Depends(ge
     out = []
     for course_id, lessons in courses.items():
         # find lesson(s) with minimum completions
+        # skip courses with no lessons or those with zero enrollments (handled at completion endpoint)
+        if not lessons:
+            continue
         min_c = min(l[2] for l in lessons)
         for lid, title, comp in lessons:
             if comp == min_c:
@@ -76,33 +100,76 @@ async def dropoff_points_report(db: AsyncSession = Depends(get_db), _=Depends(ge
 
 @router.get("/admin/reports/average-time", response_model=List[AvgTimeReportItem])
 async def avg_time_report(db: AsyncSession = Depends(get_db), _=Depends(get_current_active_superuser)):
-    # Use Lesson.duration_seconds as proxy for time; compute average per course and per lesson
-    # Average per course
-    course_q = select(Course.id, Course.title, func.avg(Lesson.duration_seconds).label("avg_seconds")).join(Lesson, Lesson.course_id == Course.id).group_by(Course.id)
-    res = await db.execute(course_q)
-    out = [AvgTimeReportItem(scope="course", id=r.id, title=r.title, avg_seconds=float(r.avg_seconds or 0.0)) for r in res.fetchall()]
-    # Average per lesson
-    lesson_q = select(Lesson.id, Lesson.title, Lesson.course_id, Lesson.duration_seconds)
+    # Use Lesson.duration_seconds as proxy for time; compute weighted average per course (weighted by distinct completions per lesson)
+    # First, fetch all lessons with their durations
+    # Only include lessons for courses that still exist
+    lesson_q = select(Lesson.id, Lesson.title, Lesson.course_id, Lesson.duration_seconds).join(Course, Course.id == Lesson.course_id).where(Course.is_published == True)
     lres = await db.execute(lesson_q)
-    for r in lres.fetchall():
-        out.append(AvgTimeReportItem(scope="lesson", id=r.id, title=r.title, course_id=r.course_id, avg_seconds=float(r.duration_seconds or 0.0)))
+    lessons = lres.fetchall()
+
+    # Fetch completion counts per lesson (distinct enrolled users)
+    # Only count completions for lessons that belong to existing courses
+    comp_q = (
+        select(Lesson.id.label('lesson_id'), func.count(func.distinct(LessonCompletion.user_id)).label('completions'))
+        .join(Course, Course.id == Lesson.course_id)
+        .where(Course.is_published == True)
+        .join(LessonCompletion, LessonCompletion.lesson_id == Lesson.id)
+        .join(Enrollment, (Enrollment.course_id == Lesson.course_id) & (Enrollment.user_id == LessonCompletion.user_id))
+        .group_by(Lesson.id)
+    )
+    comp_res = await db.execute(comp_q)
+    comp_map = {r.lesson_id: int(r.completions or 0) for r in comp_res.fetchall()}
+
+    # Build per-course aggregation
+    from collections import defaultdict
+    course_acc = defaultdict(lambda: {'title': None, 'dur_sum': 0.0, 'weight': 0})
+    out = []
+    for r in lessons:
+        dur = float(r.duration_seconds or 0.0)
+        out.append(AvgTimeReportItem(scope="lesson", id=r.id, title=r.title, course_id=r.course_id, avg_seconds=dur))
+        if dur <= 0:
+            continue
+        cnt = comp_map.get(r.id, 0)
+        if cnt <= 0:
+            # if no completions, still include lesson in course average as unweighted or skip; we'll skip here
+            continue
+        acc = course_acc[r.course_id]
+        acc['title'] = acc.get('title') or ''
+        acc['dur_sum'] += dur * cnt
+        acc['weight'] += cnt
+
+    for cid, acc in course_acc.items():
+        avg_seconds = float((acc['dur_sum'] / acc['weight']) if acc['weight'] > 0 else 0.0)
+        out.insert(0, AvgTimeReportItem(scope="course", id=cid, title=acc.get('title') or f"Course {cid}", avg_seconds=avg_seconds))
     return out
 
 
 @router.get("/admin/reports/quiz-performance", response_model=List[QuizPerformanceItem])
 async def quiz_performance_report(db: AsyncSession = Depends(get_db), _=Depends(get_current_active_superuser)):
-    q = select(Quiz.id, Quiz.course_id, Quiz.title, func.avg((QuizAttempt.score * 1.0) / (func.nullif(QuizAttempt.total, 0))).label("avg_pct"), func.count(QuizAttempt.id).label("attempts"))
-    q = q.join(QuizAttempt, QuizAttempt.quiz_id == Quiz.id, isouter=True).group_by(Quiz.id)
-    res = await db.execute(q)
+    # Safer approach: iterate quizzes and compute aggregates via scalar subqueries limited to valid attempts (total > 0)
+    # Only include quizzes that belong to existing courses
+    q = await db.execute(select(Quiz.id, Quiz.course_id, Quiz.title).join(Course, Course.id == Quiz.course_id).where(Course.is_published == True))
+    quizzes = q.fetchall()
     out = []
-    for r in res.fetchall():
-        avg_pct = float(r.avg_pct or 0.0)
-        attempts = int(r.attempts or 0)
-        pass_rate_q = select(func.count(QuizAttempt.id)).where(QuizAttempt.quiz_id == r.id, QuizAttempt.total > 0, (QuizAttempt.score * 1.0) / QuizAttempt.total >= 0.5)
-        pass_res = await db.execute(pass_rate_q)
+    for r in quizzes:
+        quiz_id = r.id
+        # count attempts with total > 0
+        attempts_q = select(func.count(QuizAttempt.id)).where(QuizAttempt.quiz_id == quiz_id, QuizAttempt.total > 0)
+        attempts_res = await db.execute(attempts_q)
+        attempts = int(attempts_res.scalar() or 0)
+
+        # average percent over valid attempts
+        avg_q = select(func.avg((QuizAttempt.score * 1.0) / QuizAttempt.total)).where(QuizAttempt.quiz_id == quiz_id, QuizAttempt.total > 0)
+        avg_res = await db.execute(avg_q)
+        avg_pct = float(avg_res.scalar() or 0.0)
+
+        # pass rate among valid attempts (>=50%)
+        pass_q = select(func.count(QuizAttempt.id)).where(QuizAttempt.quiz_id == quiz_id, QuizAttempt.total > 0, (QuizAttempt.score * 1.0) / QuizAttempt.total >= 0.5)
+        pass_res = await db.execute(pass_q)
         passes = int(pass_res.scalar() or 0)
         pass_rate = round((passes / (attempts or 1)) * 100, 2) if attempts > 0 else 0.0
-        out.append(QuizPerformanceItem(quiz_id=r.id, course_id=r.course_id, title=r.title, average_score_percent=round(avg_pct * 100, 2), attempts=attempts, pass_rate_percent=pass_rate))
+
+        out.append(QuizPerformanceItem(quiz_id=quiz_id, course_id=r.course_id, title=r.title, average_score_percent=round(avg_pct * 100, 2), attempts=attempts, pass_rate_percent=pass_rate))
     return out
 
 
