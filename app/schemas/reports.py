@@ -18,8 +18,11 @@ class CompletionRateReportItem(BaseModel):
 
 class DropoffReportItem(BaseModel):
     course_id: int
-    lesson_id: int
-    lesson_title: str
+    # type: 'lesson' or 'quiz'
+    type: str = 'lesson'
+    # generic item id (lesson_id or quiz_id)
+    item_id: int
+    title: str
     completions: int
 
 

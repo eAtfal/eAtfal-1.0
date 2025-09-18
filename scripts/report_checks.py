@@ -40,28 +40,41 @@ for cid, title, total in courses:
     print((cid, title, total, completed, pct, enrollments))
 
 print('\n=== Dropoffs (published courses lessons lowest completions) ===')
+# Combined: lessons + quizzes per published course
 cur.execute('''
-SELECT l.id, l.course_id, c.title, l.title, COUNT(DISTINCT lc.user_id) as completions
+SELECT l.course_id, l.id as item_id, l.title as title, COUNT(DISTINCT lc.user_id) as completions
 FROM lesson l
 JOIN course c ON c.id = l.course_id
 LEFT JOIN lessoncompletion lc ON lc.lesson_id = l.id
 LEFT JOIN enrollment en ON en.course_id = l.course_id AND en.user_id = lc.user_id
 WHERE c.is_published=1
 GROUP BY l.id
-ORDER BY l.course_id, completions ASC
 ''')
-rows=cur.fetchall()
+lesson_rows = cur.fetchall()
+
+cur.execute('''
+SELECT q.course_id, q.id as item_id, q.title as title, COUNT(DISTINCT qa.user_id) as completions
+FROM quiz q
+JOIN course c ON c.id = q.course_id
+LEFT JOIN quizattempt qa ON qa.quiz_id = q.id
+WHERE c.is_published=1
+GROUP BY q.id
+''')
+quiz_rows = cur.fetchall()
+
 from collections import defaultdict
 courses=defaultdict(list)
-for r in rows:
-    lid, cid, ctitle, ltitle, comps = r
-    courses[cid].append((lid, ltitle, comps))
-for cid, lessons in courses.items():
-    print('Course', cid, lessons[0][1] if lessons else 'unknown')
-    min_c = min(l[2] for l in lessons)
-    for l in lessons:
-        if l[2]==min_c:
-            print('  ', l)
+for cid, item_id, title, comps in lesson_rows:
+    courses[cid].append(('lesson', item_id, title, comps))
+for cid, item_id, title, comps in quiz_rows:
+    courses[cid].append(('quiz', item_id, title, comps))
+
+for cid, items in courses.items():
+    print('Course', cid, items[0][2] if items else 'unknown')
+    min_c = min(it[3] for it in items)
+    for it in items:
+        if it[3] == min_c:
+            print('  ', it)
 
 print('\n=== Avg Time (lesson and course weighted) ===')
 cur.execute('SELECT l.id, l.title, l.course_id, l.duration_seconds FROM lesson l JOIN course c ON c.id = l.course_id WHERE c.is_published=1')

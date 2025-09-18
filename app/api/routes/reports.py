@@ -69,32 +69,45 @@ async def dropoff_points_report(db: AsyncSession = Depends(get_db), _=Depends(ge
     # Drop-off defined as lessons with the fewest completions relative to others in same course
     # Count distinct enrolled users who completed each lesson to avoid double-counting repeat logs
     # Only consider lessons that belong to an existing course (join Course)
-    q = (
-        select(Lesson.id, Lesson.course_id, Lesson.title, func.count(func.distinct(LessonCompletion.user_id)).label("completions"))
+    # First: lesson completion counts (distinct enrolled users who completed the lesson)
+    lesson_q = (
+        select(Lesson.id.label('item_id'), Lesson.course_id, Lesson.title.label('title'), func.count(func.distinct(LessonCompletion.user_id)).label('completions'))
         .join(Course, Course.id == Lesson.course_id)
         .where(Course.is_published == True)
         .outerjoin(LessonCompletion, LessonCompletion.lesson_id == Lesson.id)
         .outerjoin(Enrollment, (Enrollment.course_id == Lesson.course_id) & (Enrollment.user_id == LessonCompletion.user_id))
         .group_by(Lesson.id)
     )
-    res = await db.execute(q)
-    rows = res.fetchall()
-    # Map course -> list of lessons with completion counts, then compute lowest per course
+    lres = await db.execute(lesson_q)
+    lesson_rows = lres.fetchall()
+
+    # Second: quiz attempt counts (count distinct users or attempts) — treat quizzes as potential drop-offs
+    quiz_q = (
+        select(Quiz.id.label('item_id'), Quiz.course_id, Quiz.title.label('title'), func.count(func.distinct(QuizAttempt.user_id)).label('completions'))
+        .join(Course, Course.id == Quiz.course_id)
+        .where(Course.is_published == True)
+        .outerjoin(QuizAttempt, QuizAttempt.quiz_id == Quiz.id)
+        .group_by(Quiz.id)
+    )
+    qres = await db.execute(quiz_q)
+    quiz_rows = qres.fetchall()
+
     from collections import defaultdict
     courses = defaultdict(list)
-    for r in rows:
-        courses[r.course_id].append((r.id, r.title, int(r.completions or 0)))
+
+    for r in lesson_rows:
+        courses[r.course_id].append({'type': 'lesson', 'item_id': int(r.item_id), 'title': r.title, 'completions': int(r.completions or 0)})
+    for r in quiz_rows:
+        courses[r.course_id].append({'type': 'quiz', 'item_id': int(r.item_id), 'title': r.title, 'completions': int(r.completions or 0)})
 
     out = []
-    for course_id, lessons in courses.items():
-        # find lesson(s) with minimum completions
-        # skip courses with no lessons or those with zero enrollments (handled at completion endpoint)
-        if not lessons:
+    for course_id, items in courses.items():
+        if not items:
             continue
-        min_c = min(l[2] for l in lessons)
-        for lid, title, comp in lessons:
-            if comp == min_c:
-                out.append(DropoffReportItem(course_id=course_id, lesson_id=lid, lesson_title=title, completions=comp))
+        min_c = min(it['completions'] for it in items)
+        for it in items:
+            if it['completions'] == min_c:
+                out.append(DropoffReportItem(course_id=course_id, type=it['type'], item_id=it['item_id'], title=it['title'], completions=it['completions']))
     return out
 
 

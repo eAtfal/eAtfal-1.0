@@ -55,7 +55,7 @@ export default function AdminReports() {
         try {
           const cr = await coursesAPI.getAll()
           const map = {}
-          ;(cr?.data || cr || []).forEach(c => { map[c.id ?? c.course_id] = c.title || c.name || `Course ${c.id ?? c.course_id}` })
+            ; (cr?.data || cr || []).forEach(c => { map[c.id ?? c.course_id] = c.title || c.name || `Course ${c.id ?? c.course_id}` })
           setCoursesMap(map)
         } catch (e) {
           // non-fatal
@@ -79,7 +79,26 @@ export default function AdminReports() {
           pct = Math.min(100, Math.max(0, Math.round(pct * 100) / 100))
           return ({ course_id: i.course_id ?? i.courseId ?? i.id ?? null, title: i.title ?? '', total_lessons: (i.total_lessons ?? i.totalLessons ?? i.total) ?? 0, completed: (i.completed ?? i.completed_count) ?? 0, percent_complete: pct })
         }) : [])
-        const normalizeDrop = (list) => (Array.isArray(list) ? list.map(i => ({ course_id: i.course_id ?? i.courseId ?? i.course ?? null, lesson_id: i.lesson_id ?? i.id ?? i.lessonId ?? null, lesson_title: i.lesson_title ?? i.title ?? '', completions: (i.completions ?? i.count) ?? 0 })) : [])
+        const normalizeDrop = (list) => (Array.isArray(list) ? list.map(i => {
+          // support both lessons and quizzes in drop-off data
+          const course_id = i.course_id ?? i.courseId ?? i.course ?? null
+          if (i.quiz_id ?? i.quizId ?? i.type === 'quiz') {
+            return {
+              type: 'quiz',
+              course_id,
+              item_id: i.quiz_id ?? i.quizId ?? i.id ?? null,
+              title: i.title ?? i.quiz_title ?? i.name ?? '',
+              completions: (i.completions ?? i.count) ?? 0,
+            }
+          }
+          return {
+            type: 'lesson',
+            course_id,
+            item_id: i.lesson_id ?? i.id ?? i.lessonId ?? null,
+            title: i.lesson_title ?? i.title ?? '',
+            completions: (i.completions ?? i.count) ?? 0,
+          }
+        }) : [])
         const normalizeAvg = (list) => (Array.isArray(list) ? list.map(i => ({ scope: i.scope ?? (i.course_id ? 'lesson' : 'course'), id: i.id ?? i.lesson_id ?? i.course_id ?? null, title: i.title ?? '', course_id: i.course_id ?? i.courseId ?? null, avg_seconds: (i.avg_seconds ?? i.average_time ?? i.duration_seconds ?? i.avgSeconds) ?? 0 })) : [])
         const normalizeQuiz = (list) => (Array.isArray(list) ? list.map(i => ({ quiz_id: i.quiz_id ?? i.id ?? null, course_id: i.course_id ?? i.courseId ?? null, title: i.title ?? '', average_score_percent: (i.average_score_percent ?? i.avg_pct ?? i.average_score) ?? 0, attempts: (i.attempts ?? i.count) ?? 0, pass_rate_percent: (i.pass_rate_percent ?? i.pass_rate) ?? 0 })) : [])
         const normalizeLeaderboard = (list) => (Array.isArray(list) ? list.map(i => ({ user_id: i.user_id ?? i.id ?? null, full_name: (i.full_name ?? i.name ?? i.fullName) ?? '', points: (i.points ?? i.score) ?? 0 })) : [])
@@ -129,7 +148,7 @@ export default function AdminReports() {
   const csvData = useMemo(() => {
     const csvEnroll = enrollments.map(e => ({ course_id: e.course_id, title: e.title, enrollments: e.enrollments }))
     const csvCompletion = completion.map(c => ({ course_id: c.course_id, title: c.title, total_lessons: c.total_lessons, completed: c.completed, percent_complete: c.percent_complete }))
-    const csvDrop = dropoffs.map(d => ({ course_id: d.course_id, lesson_id: d.lesson_id, lesson_title: d.lesson_title, completions: d.completions }))
+  const csvDrop = dropoffs.map(d => ({ course_id: d.course_id, type: d.type || 'lesson', item_id: d.item_id ?? d.lesson_id, title: d.title ?? d.lesson_title, completions: d.completions }))
     const csvAvg = avgTime.map(a => ({ scope: a.scope, id: a.id, title: a.title, course_id: a.course_id, avg_seconds: a.avg_seconds }))
     const csvQuiz = quizPerf.map(q => ({ quiz_id: q.quiz_id, title: q.title, average_score_percent: q.average_score_percent, attempts: q.attempts, pass_rate_percent: q.pass_rate_percent }))
     const csvLb = leaderboard.map(l => ({ user_id: l.user_id, full_name: l.full_name, points: l.points }))
@@ -222,45 +241,103 @@ export default function AdminReports() {
         {/* Drop-off Points */}
         <section className="bg-white rounded-lg shadow">
           <h2 className="text-xl font-semibold p-4 border-b">Drop-off Points</h2>
-          <div className="p-4 h-80">
-            <div className="space-y-4 overflow-auto h-full">
+          <div className="p-4 h-96">
+            <div className="space-y-6 overflow-auto h-full">
               {Object.entries(
-                dropoffs.reduce((acc, d) => {
+                // merge dropoff items with quizzes (use attempts as completions)
+                ([...dropoffs, ...quizPerf.map(q => ({ type: 'quiz', course_id: q.course_id, item_id: q.quiz_id, title: q.title, completions: q.attempts || 0 }))])
+                .reduce((acc, d) => {
                   const cid = d.course_id ?? 'unknown'
                   acc[cid] = acc[cid] || { course_id: cid, lessons: [] }
                   acc[cid].lessons.push(d)
                   return acc
                 }, {})
               )
-              .filter(([cid]) => !!coursesMap[cid])
-              .map(([cid, group]) => {
-                const courseTitle = coursesMap[cid]
-                const lessons = (group.lessons || []).slice().sort((a, b) => (a.completions || 0) - (b.completions || 0))
-                const lowest = lessons.length ? lessons[0].completions || 0 : 0
-                const lowestLessons = lessons.filter(l => (l.completions || 0) === lowest)
-                return (
-                  <div key={cid} className="border rounded p-3">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <div className="font-semibold">{courseTitle}</div>
-                        <div className="text-sm text-gray-600">Lowest completions: {lowest}</div>
+                .filter(([cid]) => !!coursesMap[cid])
+                .map(([cid, group]) => {
+                  const courseTitle = coursesMap[cid]
+                    const items = (group.lessons || [])
+                      .slice()
+                      .sort((a, b) => (a.completions || 0) - (b.completions || 0))
+                    const lowest = items.length ? items[0].completions || 0 : 0
+                    const lowestItems = items.filter((l) => (l.completions || 0) === lowest)
+                  return (
+                    <div key={cid} className="border rounded-lg p-4 shadow-sm bg-gray-50">
+                      <div className="mb-4">
+                        <div className="font-semibold text-lg">{courseTitle}</div>
+                        <div className="text-sm text-gray-600">
+                          Lowest completions: {lowest}
+                        </div>
                         <div className="text-sm mt-2">
-                          {lowestLessons.map((l, i) => (
-                            <div key={l.lesson_id || i} className="text-sm">• {l.lesson_title} — {l.completions} completions</div>
+                          {lowestItems.map((l, i) => (
+                            <div key={l.item_id || i} className="text-sm">
+                              • {l.title} {l.type === 'quiz' ? <span className="ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded text-xs">Quiz</span> : ''} — {l.completions} completions
+                            </div>
                           ))}
                         </div>
                       </div>
-                      <div className="w-48 h-16">
+                      <div className="w-full h-64">
                         <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={lessons.map(x => ({ name: x.lesson_title, completions: x.completions }))}>
-                            <Line type="monotone" dataKey="completions" stroke="#f59e0b" dot={false} />
+                          <LineChart
+                            data={items.map((x) => ({
+                              name: x.title,
+                              completions: x.completions || 0,
+                            }))}
+                            margin={{ top: 10, right: 30, left: 0, bottom: 40 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                            <XAxis
+                              dataKey="name"
+                              angle={-30}
+                              textAnchor="end"
+                              interval={0}
+                              tick={{ fontSize: 12 }}
+                            />
+                            <YAxis tick={{ fontSize: 12 }} />
+                            <Tooltip
+                              formatter={(value, name, props) => [`${value} completions`, props && props.payload && props.payload.type === 'quiz' ? 'Quiz' : 'Lesson']}
+                              labelFormatter={(label, payload) => {
+                                const t = payload && payload[0] && payload[0].payload && payload[0].payload.type === 'quiz' ? 'Quiz' : 'Lesson'
+                                return `${t}: ${label}`
+                              }}
+                            />
+                            <Legend />
+                            <Line
+                              type="monotone"
+                              dataKey="completions"
+                              stroke="#f59e0b"
+                              strokeWidth={3}
+                              dot={{ r: 5, fill: '#f59e0b' }}
+                              activeDot={{ r: 8 }}
+                            />
+                            <Area
+                              type="monotone"
+                              dataKey="completions"
+                              stroke={false}
+                              fill="url(#colorCompletions)"
+                            />
+                            <defs>
+                              <linearGradient
+                                id="colorCompletions"
+                                x1="0"
+                                y1="0"
+                                x2="0"
+                                y2="1"
+                              >
+                                <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.4} />
+                                <stop
+                                  offset="95%"
+                                  stopColor="#f59e0b"
+                                  stopOpacity={0}
+                                />
+                              </linearGradient>
+                            </defs>
                           </LineChart>
                         </ResponsiveContainer>
                       </div>
                     </div>
-                  </div>
-                )
-              })}
+                  )
+                })}
             </div>
           </div>
         </section>
